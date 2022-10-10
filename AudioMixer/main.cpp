@@ -22,7 +22,7 @@ int main(void)
 
     AudioMixer_Init();
     try {
-        AudioMixer_PlayMusicAsync("/app0/assets/audio/music.wav", true);
+        AudioMixer_PlayMusic("/app0/assets/audio/music.wav", true);
     }
     catch (const std::exception& exc) {
     }
@@ -32,7 +32,7 @@ int main(void)
     for (;;) {
         sceKernelUsleep(2 * 1000000);
         try {
-            AudioMixer_PlayMusicAsync("/app0/assets/audio/lasergun.wav", false);
+            AudioMixer_PlaySound("/app0/assets/audio/lasergun.wav", false);
         }
         catch (const std::exception& exc) {
         }
