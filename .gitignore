@@ -1,0 +1,4 @@
+/.vs/*
+/*.pkg
+*.o
+/AudioMixer/x64/*
