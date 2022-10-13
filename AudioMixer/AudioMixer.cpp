@@ -6,17 +6,7 @@ Author : LordKBX
 
 GitHub: https://github.com/LordKBX/PS4-AudioMixer
 */
-#include <orbis/AudioOut.h>
-#include <orbis/UserService.h>
-#include <iostream>       // std::cout
-#include <thread>         // std::thread
-#include <mutex>         // std::thread
-
-#include <algorithm>
-#include <list>
-#include <vector>
-#include <map>
-#include <iterator>
+#include "AudioMixer.h"
 
 // Header library for decoding wav files
 #define DR_WAV_IMPLEMENTATION
@@ -24,63 +14,61 @@ GitHub: https://github.com/LordKBX/PS4-AudioMixer
 
 #define PARAMS16 ORBIS_AUDIO_OUT_PARAM_FORMAT_S16_STEREO
 
-class SoundStruct
-{
-public:
-    size_t sampleCount;
-    drwav_int16* pSampleData;
-    SoundStruct(size_t sampleCount) {
-        this->sampleCount = sampleCount;
-        this->pSampleData = (drwav_int16*)malloc(sampleCount * sizeof(uint16_t));
-    }
-};
+#include "../Common.h"
 
-int32_t serviceId;
+AudioMixer::AudioMixer() {
+    sceUserServiceInitialize(NULL);
+    this->serviceId = sceAudioOutInit();
+    if (this->serviceId != 0) { throw std::runtime_error("[ERROR] Failed to initialize audio output\n"); return; }
 
-std::vector<std::thread> AudioMixer_list_thread_sound;
-std::vector<std::thread> AudioMixer_list_thread_music;
-std::vector<int> AudioMixer_list_musics_channel;
-std::map<std::string, SoundStruct> AudioMixer_cache;
-std::mutex AudioMixer_cache_mutex;
-bool AudioMixer_initialized = false;
+    this->initialized = true;
+}
+AudioMixer::AudioMixer(std::string base_folder) {
+    if (IsPathExist(base_folder)) { this->base_folder = base_folder; }
+    sceUserServiceInitialize(NULL);
+    this->serviceId = sceAudioOutInit();
+    if (this->serviceId != 0) { throw std::runtime_error("[ERROR] Failed to initialize audio output\n"); return; }
 
-bool AudioMixer_Init() {
-    if (AudioMixer_initialized == false) {
-        sceUserServiceInitialize(NULL);
-        serviceId = sceAudioOutInit();
-        if (serviceId != 0) { throw std::runtime_error("[ERROR] Failed to initialize audio output\n"); return false; }
-        AudioMixer_cache = std::map<std::string, SoundStruct>();
-
-        AudioMixer_list_musics_channel = std::vector<int>();
-        AudioMixer_list_thread_sound = std::vector<std::thread>();
-        AudioMixer_list_thread_music = std::vector<std::thread>();
-
-        AudioMixer_initialized = true;
-        return true;
-    }
-    return false;
+    this->initialized = true;
 }
 
-void AudioMixer_ReadSound(std::string path, bool loop = false) {
+std::vector<std::string> AudioMixer::List_Cached() {
+    std::vector<std::string> liste = std::vector<std::string>();
+    for (auto it = this->cache_sounds.begin(); it != this->cache_sounds.end(); it++) {
+        liste.push_back(it->first);
+    }
+    return liste;
+}
+
+std::vector<std::string> AudioMixer::List_Availlable() {
+    std::vector<std::string> liste = std::vector<std::string>();
+    if (this->base_folder == "") { return; }
+    std::vector<std::string> ll = FolderListing(this->base_folder, true, ".wav");
+    return liste;
+}
+
+void AudioMixer::ReadSound(std::string path, bool loop) {
     // Decode a wav file to play
     size_t sampleCount;
     drwav_int16* pSampleData;
-    AudioMixer_cache_mutex.lock();
-    std::map<std::string, SoundStruct>::iterator it = AudioMixer_cache.find(path);
-    if (it != AudioMixer_cache.end()) {
-        sampleCount = AudioMixer_cache.at(path).sampleCount;
+    if (this->initialized == false) { return; }
+    this->cache_mutex.lock();
+    std::map<std::string, SoundStruct>::iterator it = this->cache_sounds.find(path);
+    if (it != this->cache_sounds.end()) {
+        sampleCount = this->cache_sounds.at(path).sampleCount;
         pSampleData = (drwav_int16*)malloc(sampleCount * sizeof(uint16_t));
-        memcpy(pSampleData, AudioMixer_cache.at(path).pSampleData, sampleCount * sizeof(uint16_t));
+        memcpy(pSampleData, this->cache_sounds.at(path).pSampleData, sampleCount * sizeof(uint16_t));
     }
     else
     {
         drwav wav;
+        if (!IsPathExist(path)) { return; }
         bool loaded = drwav_init_file(&wav, path.c_str(), NULL);
         if (!loaded)
         {
             throw std::runtime_error("[ERROR] Failed to decode wav file\n");
             return;
-        }
+        } 
 
         // Calculate the sample count and allocate a buffer for the sample data accordingly
         sampleCount = wav.totalPCMFrameCount * wav.channels;
@@ -90,10 +78,10 @@ void AudioMixer_ReadSound(std::string path, bool loop = false) {
         drwav_read_pcm_frames_s16(&wav, wav.totalPCMFrameCount, pSampleData);
         drwav_uninit(&wav);
 
-        AudioMixer_cache.emplace(path, SoundStruct(sampleCount));
-        memcpy(AudioMixer_cache.at(path).pSampleData, pSampleData, sampleCount * sizeof(uint16_t));
+        this->cache_sounds.emplace(path, SoundStruct(sampleCount));
+        memcpy(this->cache_sounds.at(path).pSampleData, pSampleData, sampleCount * sizeof(uint16_t));
     }
-    AudioMixer_cache_mutex.unlock();
+    this->cache_mutex.unlock();
 
     int audio = sceAudioOutOpen(ORBIS_USER_SERVICE_USER_ID_SYSTEM, ORBIS_AUDIO_OUT_PORT_TYPE_MAIN, 0, 256, 48000, PARAMS16);
     if (audio <= 0) { throw std::runtime_error("[ERROR] Failed to open audio on main port\n"); return; }
@@ -103,8 +91,8 @@ void AudioMixer_ReadSound(std::string path, bool loop = false) {
         throw std::runtime_error("[ERROR] Failed to open audio on main port\n");
         return;
     }
-    if (loop == true) {
-        AudioMixer_list_musics_channel.push_back(audio);
+    if (loop == true) { 
+        this->list_musics_channel.push_back(audio);
     }
 
     // Play the sample
@@ -138,27 +126,29 @@ void AudioMixer_ReadSound(std::string path, bool loop = false) {
     free(pSampleData);
 }
 
-void AudioMixer_PlayLoop(std::string path) { AudioMixer_ReadSound(path, true); }
-void AudioMixer_PlayUnique(std::string path) { AudioMixer_ReadSound(path, false); }
+void AudioMixer::PlayLoop(std::string path) { ReadSound(path, true); }
+void AudioMixer::PlayUnique(std::string path) { ReadSound(path, false); }
 
-void AudioMixer_PlayMusic(std::string path) {
-    for (int i = AudioMixer_list_thread_music.size() - 1; i >= 0; --i) {
-        if (AudioMixer_list_thread_music.at(i).joinable()) {
-            AudioMixer_list_thread_music.at(i).~thread();
+void AudioMixer::PlayMusic(std::string path) {
+    if (initialized == false) { return; }
+    for (int i = list_thread_music.size() - 1; i >= 0; --i) {
+        if (list_thread_music.at(i).joinable()) {
+            //list_thread_music.at(i).~thread();
         }
-        AudioMixer_list_thread_music.erase(AudioMixer_list_thread_music.begin() + i);
+        list_thread_music.erase(list_thread_music.begin() + i);
     }
 
-    AudioMixer_list_thread_music.push_back(std::thread(AudioMixer_PlayLoop, path));
+    list_thread_music.push_back(std::thread(&AudioMixer::PlayLoop, this, path));
 }
 
-void AudioMixer_PlaySound(std::string path) {
-    for (int i = AudioMixer_list_thread_sound.size() - 1; i >= 0; --i) {
-        if (!AudioMixer_list_thread_sound.at(i).joinable()) {
-            AudioMixer_list_thread_sound.at(i).~thread();
-            AudioMixer_list_thread_sound.erase(AudioMixer_list_thread_sound.begin() + i);
+void AudioMixer::PlaySound(std::string path) {
+    if (initialized == false) { return; }
+    for (int i = list_thread_sound.size() - 1; i >= 0; --i) {
+        if (!list_thread_sound.at(i).joinable()) {
+            list_thread_sound.at(i).~thread();
+            list_thread_sound.erase(list_thread_sound.begin() + i);
         }
     }
 
-    AudioMixer_list_thread_sound.push_back(std::thread(AudioMixer_PlayUnique, path));
+    list_thread_music.push_back(std::thread(&AudioMixer::PlayUnique, this, path));
 }

@@ -20,9 +20,9 @@ int main(void)
 
     sceKernelUsleep(2 * 1000000);
 
-    AudioMixer_Init();
+    AudioMixer mixer;
     try {
-        AudioMixer_PlayMusic("/app0/assets/audio/music.wav", true);
+        mixer.PlayMusic("/app0/assets/audio/music.wav", true);
     }
     catch (const std::exception& exc) {
     }
@@ -32,7 +32,7 @@ int main(void)
     for (;;) {
         sceKernelUsleep(2 * 1000000);
         try {
-            AudioMixer_PlaySound("/app0/assets/audio/lasergun.wav", false);
+            mixer.PlaySound("/app0/assets/audio/lasergun.wav", false);
         }
         catch (const std::exception& exc) {
         }
